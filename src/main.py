@@ -1,33 +1,60 @@
-# Decentralized Governance Protocol
-
+import os
+import json
+import time
 import random
+import requests
+from typing import List, Dict
 
-class GovernanceNode:
-    def __init__(self, node_id):
-        self.node_id = node_id
-        self.vote_weight = random.uniform(0.1, 1.0)
-        self.vote_history = []
+class SwarmOrchestrator:
+    def __init__(self, swarm_config_path: str):
+        with open(swarm_config_path, 'r') as f:
+            self.config = json.load(f)
+        self.nodes = self.config['nodes']
+        self.replication_factor = self.config['replication_factor']
 
-class GovernanceProtocol:
-    def __init__(self, num_nodes=10):
-        self.nodes = [GovernanceNode(i) for i in range(num_nodes)]
-        self.proposal_queue = []
+    def _get_available_nodes(self) -> List[str]:
+        available_nodes = []
+        for node in self.nodes:
+            try:
+                response = requests.get(f"http://{node}/health")
+                if response.status_code == 200:
+                    available_nodes.append(node)
+            except requests.exceptions.RequestException:
+                continue
+        return available_nodes
 
-    def submit_proposal(self, proposal):
-        self.proposal_queue.append(proposal)
+    def _assign_replicas(self, data: bytes, num_replicas: int) -> Dict[str, bytes]:
+        available_nodes = self._get_available_nodes()
+        if len(available_nodes) < num_replicas:
+            raise ValueError("Not enough available nodes to satisfy replication factor")
 
-    def vote_on_proposal(self, node, proposal):
-        node.vote_history.append(proposal)
-        total_weight = sum(n.vote_weight for n in self.nodes)
-        if sum(n.vote_weight for n in self.nodes if proposal in n.vote_history) / total_weight > 0.5:
-            self.execute_proposal(proposal)
+        replica_assignments = {}
+        for i in range(num_replicas):
+            node = random.choice(available_nodes)
+            available_nodes.remove(node)
+            replica_assignments[node] = data
 
-    def execute_proposal(self, proposal):
-        print(f"Executing proposal: {proposal}")
-        self.proposal_queue.remove(proposal)
+        return replica_assignments
 
-if __name__ == "__main__":
-    protocol = GovernanceProtocol()
-    protocol.submit_proposal("Increase node reward rate")
-    for node in protocol.nodes:
-        protocol.vote_on_proposal(node, "Increase node reward rate")
+    def store_data(self, data: bytes) -> None:
+        replicas = self._assign_replicas(data, self.replication_factor)
+        for node, replica in replicas.items():
+            try:
+                requests.post(f"http://{node}/store", data=replica)
+            except requests.exceptions.RequestException:
+                continue
+
+    def retrieve_data(self, key: str) -> bytes:
+        available_nodes = self._get_available_nodes()
+        if len(available_nodes) < self.replication_factor:
+            raise ValueError("Not enough available nodes to satisfy replication factor")
+
+        for node in available_nodes:
+            try:
+                response = requests.get(f"http://{node}/retrieve?key={key}")
+                if response.status_code == 200:
+                    return response.content
+            except requests.exceptions.RequestException:
+                continue
+
+        raise ValueError(f"Could not retrieve data for key: {key}")
