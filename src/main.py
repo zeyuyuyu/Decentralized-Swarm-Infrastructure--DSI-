@@ -1,65 +1,47 @@
-import os
-import time
-import random
 import asyncio
-from typing import List
+import random
+import time
 
-from dsi.swarm import Swarm
-from dsi.node import Node
-from dsi.task import Task
+class DecentralizedSwarmConsensus:
+    def __init__(self, node_count, quorum_size):
+        self.node_count = node_count
+        self.quorum_size = quorum_size
+        self.nodes = [Node(i) for i in range(node_count)]
+        self.consensus_state = {}
 
-class DecentralizedSwarmOrchestrator:
-    def __init__(self, swarm_size: int = 10, task_queue_size: int = 100):
-        self.swarm = Swarm(size=swarm_size)
-        self.task_queue: List[Task] = []
-        self.task_queue_size = task_queue_size
-
-    async def run(self):
+    async def run_consensus(self):
         while True:
-            # Check for new tasks
-            self.check_for_new_tasks()
+            await asyncio.gather(*[node.propose_update() for node in self.nodes])
+            await asyncio.gather(*[node.vote_on_updates() for node in self.nodes])
+            await self.tally_votes()
+            await asyncio.sleep(random.uniform(1, 5))
 
-            # Assign tasks to available nodes
-            await self.assign_tasks_to_nodes()
+    async def tally_votes(self):
+        for key, votes in self.consensus_state.items():
+            if len(votes) >= self.quorum_size:
+                print(f'Consensus reached on key: {key}, value: {max(votes, key=votes.count)}')
+                for node in self.nodes:
+                    node.consensus_state[key] = max(votes, key=votes.count)
+            else:
+                print(f'No consensus reached on key: {key}')
 
-            # Monitor node status and reallocate tasks if needed
-            await self.monitor_nodes()
+class Node:
+    def __init__(self, node_id):
+        self.node_id = node_id
+        self.consensus_state = {}
 
-            # Wait before checking again
-            await asyncio.sleep(1)
+    async def propose_update(self):
+        key = random.choice(list(self.consensus_state.keys()))
+        value = random.randint(1, 100)
+        self.consensus_state[key] = value
+        print(f'Node {self.node_id} proposed update: {key}={value}')
 
-    def check_for_new_tasks(self):
-        # Simulate new tasks being added to the queue
-        new_tasks = [Task(f'Task {i}', random.randint(1, 10)) for i in range(random.randint(1, 5))]
-        self.task_queue.extend(new_tasks)
-
-        # Trim the queue if it gets too large
-        if len(self.task_queue) > self.task_queue_size:
-            self.task_queue = self.task_queue[:self.task_queue_size]
-
-    async def assign_tasks_to_nodes(self):
-        # Find available nodes
-        available_nodes = [node for node in self.swarm.nodes if not node.is_busy()]
-
-        # Assign tasks to available nodes
-        for task in self.task_queue:
-            if available_nodes:
-                node = available_nodes.pop(0)
-                await node.execute_task(task)
-                self.task_queue.remove(task)
-
-    async def monitor_nodes(self):
-        # Check node status and reallocate tasks if needed
-        for node in self.swarm.nodes:
-            if node.is_failed():
-                # Reallocate tasks from failed node to available nodes
-                failed_tasks = node.get_failed_tasks()
-                available_nodes = [n for n in self.swarm.nodes if not n.is_busy()]
-                for task in failed_tasks:
-                    if available_nodes:
-                        new_node = available_nodes.pop(0)
-                        await new_node.execute_task(task)
+    async def vote_on_updates(self):
+        for key, value in self.consensus_state.items():
+            if key not in DSI.consensus_state:
+                DSI.consensus_state[key] = []
+            DSI.consensus_state[key].append(value)
 
 if __name__ == '__main__':
-    orchestrator = DecentralizedSwarmOrchestrator()
-    asyncio.run(orchestrator.run())
+    DSI = DecentralizedSwarmConsensus(node_count=10, quorum_size=6)
+    asyncio.run(DSI.run_consensus())
