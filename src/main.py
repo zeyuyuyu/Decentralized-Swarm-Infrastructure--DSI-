@@ -2,59 +2,64 @@ import os
 import json
 import time
 import random
-import requests
+import multiprocessing as mp
+
 from typing import List, Dict
 
+class SwarmNode:
+    def __init__(self, node_id: str, capabilities: List[str]):
+        self.node_id = node_id
+        self.capabilities = capabilities
+        self.load = 0
+        self.available = True
+
 class SwarmOrchestrator:
-    def __init__(self, swarm_config_path: str):
-        with open(swarm_config_path, 'r') as f:
-            self.config = json.load(f)
-        self.nodes = self.config['nodes']
-        self.replication_factor = self.config['replication_factor']
+    def __init__(self, nodes: List[SwarmNode]):
+        self.nodes = nodes
+        self.task_queue: List[Dict] = []
+        self.running_tasks: Dict[str, SwarmNode] = {}
 
-    def _get_available_nodes(self) -> List[str]:
-        available_nodes = []
-        for node in self.nodes:
-            try:
-                response = requests.get(f"http://{node}/health")
-                if response.status_code == 200:
-                    available_nodes.append(node)
-            except requests.exceptions.RequestException:
-                continue
-        return available_nodes
+    def add_task(self, task: Dict):
+        self.task_queue.append(task)
 
-    def _assign_replicas(self, data: bytes, num_replicas: int) -> Dict[str, bytes]:
-        available_nodes = self._get_available_nodes()
-        if len(available_nodes) < num_replicas:
-            raise ValueError("Not enough available nodes to satisfy replication factor")
+    def allocate_task(self):
+        while self.task_queue:
+            task = self.task_queue.pop(0)
+            capabilities = task['required_capabilities']
+            available_nodes = [node for node in self.nodes if node.available and all(cap in node.capabilities for cap in capabilities)]
+            if available_nodes:
+                node = min(available_nodes, key=lambda n: n.load)
+                node.load += 1
+                node.available = False
+                self.running_tasks[task['id']] = node
+                return task
+        return None
 
-        replica_assignments = {}
-        for i in range(num_replicas):
-            node = random.choice(available_nodes)
-            available_nodes.remove(node)
-            replica_assignments[node] = data
+    def complete_task(self, task_id: str):
+        if task_id in self.running_tasks:
+            node = self.running_tasks.pop(task_id)
+            node.load -= 1
+            node.available = True
 
-        return replica_assignments
+def simulate_swarm(num_nodes: int, num_tasks: int):
+    nodes = [SwarmNode(f'node_{i}', random.sample(['cpu', 'gpu', 'memory', 'storage'], random.randint(1, 4))) for i in range(num_nodes)]
+    orchestrator = SwarmOrchestrator(nodes)
 
-    def store_data(self, data: bytes) -> None:
-        replicas = self._assign_replicas(data, self.replication_factor)
-        for node, replica in replicas.items():
-            try:
-                requests.post(f"http://{node}/store", data=replica)
-            except requests.exceptions.RequestException:
-                continue
+    for _ in range(num_tasks):
+        task = {
+            'id': f'task_{len(orchestrator.task_queue)}',
+            'required_capabilities': random.sample(['cpu', 'gpu', 'memory', 'storage'], random.randint(1, 3))
+        }
+        orchestrator.add_task(task)
 
-    def retrieve_data(self, key: str) -> bytes:
-        available_nodes = self._get_available_nodes()
-        if len(available_nodes) < self.replication_factor:
-            raise ValueError("Not enough available nodes to satisfy replication factor")
+    while orchestrator.task_queue or orchestrator.running_tasks:
+        task = orchestrator.allocate_task()
+        if task:
+            print(f'Allocated task {task["id"]} to node {orchestrator.running_tasks[task["id"]].node_id}')
+            time.sleep(random.uniform(1, 5))
+            orchestrator.complete_task(task['id'])
+        else:
+            time.sleep(0.1)
 
-        for node in available_nodes:
-            try:
-                response = requests.get(f"http://{node}/retrieve?key={key}")
-                if response.status_code == 200:
-                    return response.content
-            except requests.exceptions.RequestException:
-                continue
-
-        raise ValueError(f"Could not retrieve data for key: {key}")
+if __name__ == '__main__':
+    simulate_swarm(10, 20)
