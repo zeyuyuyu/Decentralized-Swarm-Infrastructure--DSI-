@@ -1,47 +1,66 @@
-import asyncio
-import random
+import os
+import json
 import time
+import random
+import hashlib
+import threading
 
-class DecentralizedSwarmConsensus:
-    def __init__(self, node_count, quorum_size):
-        self.node_count = node_count
-        self.quorum_size = quorum_size
-        self.nodes = [Node(i) for i in range(node_count)]
-        self.consensus_state = {}
-
-    async def run_consensus(self):
-        while True:
-            await asyncio.gather(*[node.propose_update() for node in self.nodes])
-            await asyncio.gather(*[node.vote_on_updates() for node in self.nodes])
-            await self.tally_votes()
-            await asyncio.sleep(random.uniform(1, 5))
-
-    async def tally_votes(self):
-        for key, votes in self.consensus_state.items():
-            if len(votes) >= self.quorum_size:
-                print(f'Consensus reached on key: {key}, value: {max(votes, key=votes.count)}')
-                for node in self.nodes:
-                    node.consensus_state[key] = max(votes, key=votes.count)
-            else:
-                print(f'No consensus reached on key: {key}')
-
-class Node:
+class SwarmNode:
     def __init__(self, node_id):
         self.node_id = node_id
-        self.consensus_state = {}
+        self.ledger = []
+        self.pending_transactions = []
+        self.neighbors = []
+        self.lock = threading.Lock()
 
-    async def propose_update(self):
-        key = random.choice(list(self.consensus_state.keys()))
-        value = random.randint(1, 100)
-        self.consensus_state[key] = value
-        print(f'Node {self.node_id} proposed update: {key}={value}')
+    def add_transaction(self, transaction):
+        with self.lock:
+            self.pending_transactions.append(transaction)
 
-    async def vote_on_updates(self):
-        for key, value in self.consensus_state.items():
-            if key not in DSI.consensus_state:
-                DSI.consensus_state[key] = []
-            DSI.consensus_state[key].append(value)
+    def propose_block(self):
+        with self.lock:
+            block = {
+                'index': len(self.ledger),
+                'timestamp': time.time(),
+                'transactions': self.pending_transactions,
+                'previous_hash': self.ledger[-1]['hash'] if self.ledger else '0'
+            }
+            block['hash'] = self.calculate_hash(block)
+            self.ledger.append(block)
+            self.pending_transactions = []
+            return block
+
+    def calculate_hash(self, block):
+        block_string = json.dumps(block, sort_keys=True).encode()
+        return hashlib.sha256(block_string).hexdigest()
+
+    def validate_block(self, block):
+        if block['index'] != len(self.ledger):
+            return False
+        if block['previous_hash'] != (self.ledger[-1]['hash'] if self.ledger else '0'):
+            return False
+        if block['hash'] != self.calculate_hash(block):
+            return False
+        return True
+
+    def run_consensus(self):
+        while True:
+            time.sleep(random.uniform(1, 5))
+            block = self.propose_block()
+            votes = 0
+            for neighbor in self.neighbors:
+                if neighbor.validate_block(block):
+                    votes += 1
+            if votes > len(self.neighbors) // 2:
+                for neighbor in self.neighbors:
+                    neighbor.add_block(block)
+
+def main():
+    nodes = [SwarmNode(f'node_{i}') for i in range(10)]
+    for node in nodes:
+        node.neighbors = [n for n in nodes if n != node]
+    for node in nodes:
+        threading.Thread(target=node.run_consensus).start()
 
 if __name__ == '__main__':
-    DSI = DecentralizedSwarmConsensus(node_count=10, quorum_size=6)
-    asyncio.run(DSI.run_consensus())
+    main()
