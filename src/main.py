@@ -1,66 +1,60 @@
-import os
-import json
-import time
 import random
-import hashlib
-import threading
+import time
+import json
+import requests
 
-class SwarmNode:
-    def __init__(self, node_id):
-        self.node_id = node_id
-        self.ledger = []
-        self.pending_transactions = []
-        self.neighbors = []
-        self.lock = threading.Lock()
+# Node discovery and registration
+NODE_REGISTRY_URL = 'https://dsi-registry.example.com/nodes'
 
-    def add_transaction(self, transaction):
-        with self.lock:
-            self.pending_transactions.append(transaction)
+def register_node():
+    node_info = {
+        'id': f'node-{random.randint(1000, 9999)}',
+        'address': f'tcp://127.0.0.1:{random.randint(10000, 19999)}',
+        'capabilities': ['storage', 'compute', 'network']
+    }
+    response = requests.post(NODE_REGISTRY_URL, json=node_info)
+    if response.status_code == 201:
+        print(f'Node registered: {node_info["id"]}')
+    else:
+        print(f'Failed to register node: {response.status_code}')
 
-    def propose_block(self):
-        with self.lock:
-            block = {
-                'index': len(self.ledger),
-                'timestamp': time.time(),
-                'transactions': self.pending_transactions,
-                'previous_hash': self.ledger[-1]['hash'] if self.ledger else '0'
-            }
-            block['hash'] = self.calculate_hash(block)
-            self.ledger.append(block)
-            self.pending_transactions = []
-            return block
+# Swarm self-organization
+SWARM_DISCOVERY_INTERVAL = 60  # seconds
 
-    def calculate_hash(self, block):
-        block_string = json.dumps(block, sort_keys=True).encode()
-        return hashlib.sha256(block_string).hexdigest()
+def discover_swarm():
+    response = requests.get(NODE_REGISTRY_URL)
+    if response.status_code == 200:
+        nodes = response.json()
+        print(f'Discovered {len(nodes)} nodes in the swarm')
+        # Implement swarm self-organization logic here
+        organize_swarm(nodes)
+    else:
+        print(f'Failed to discover swarm: {response.status_code}')
 
-    def validate_block(self, block):
-        if block['index'] != len(self.ledger):
-            return False
-        if block['previous_hash'] != (self.ledger[-1]['hash'] if self.ledger else '0'):
-            return False
-        if block['hash'] != self.calculate_hash(block):
-            return False
-        return True
-
-    def run_consensus(self):
-        while True:
-            time.sleep(random.uniform(1, 5))
-            block = self.propose_block()
-            votes = 0
-            for neighbor in self.neighbors:
-                if neighbor.validate_block(block):
-                    votes += 1
-            if votes > len(self.neighbors) // 2:
-                for neighbor in self.neighbors:
-                    neighbor.add_block(block)
-
-def main():
-    nodes = [SwarmNode(f'node_{i}') for i in range(10)]
+def organize_swarm(nodes):
+    # Example logic: Assign tasks to nodes based on their capabilities
     for node in nodes:
-        node.neighbors = [n for n in nodes if n != node]
-    for node in nodes:
-        threading.Thread(target=node.run_consensus).start()
+        if 'storage' in node['capabilities']:
+            assign_storage_task(node)
+        if 'compute' in node['capabilities']:
+            assign_compute_task(node)
+        if 'network' in node['capabilities']:
+            assign_network_task(node)
 
-if __name__ == '__main__':
-    main()
+def assign_storage_task(node):
+    print(f'Assigned storage task to node: {node["id"]}')
+    # Implement storage task logic here
+
+def assign_compute_task(node):
+    print(f'Assigned compute task to node: {node["id"]}')
+    # Implement compute task logic here
+
+def assign_network_task(node):
+    print(f'Assigned network task to node: {node["id"]}')
+    # Implement network task logic here
+
+# Main loop
+while True:
+    register_node()
+    discover_swarm()
+    time.sleep(SWARM_DISCOVERY_INTERVAL)
